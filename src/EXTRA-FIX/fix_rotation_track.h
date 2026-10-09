@@ -12,6 +12,7 @@ FixStyle(rotation/track,FixRotationTrack);
 #include "fix.h"
 #include <vector>
 #include <string>
+#include <cstdio>
 
 namespace LAMMPS_NS {
 
@@ -24,6 +25,7 @@ class FixRotationTrack : public Fix {
     void end_of_step() override; // à chaque nevery demandé
     // void write_restart(FILE *) override;
     // void restart(char *) override;
+    ~FixRotationTrack() override;
 
     protected:
     int n_mol = 0;
@@ -37,11 +39,13 @@ class FixRotationTrack : public Fix {
     std::vector<double> phi_total; // longueur 3 * n_theta * n_mol
     std::vector<tagint> mol_tag; // longueur 3*n_mol
     std::string output_file;
+    std::vector<FILE *> files;
 
     // functions for rotations calculations
     void body_frame(double *e1, double *v, double *R);
     void compute_all_bodyframes();
     void rotation_vector(const double *dR, double *w);
+    void write_frame();
 };
 
 } // namespace LAMMPS_NS

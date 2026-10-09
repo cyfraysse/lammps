@@ -13,6 +13,9 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include "comm.h"
+#include "update.h"
+#include <string>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -25,7 +28,7 @@ FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
 {
     nevery = 1;
     theta_T = {MY_PI4}; // pi/4
-    output_file = "phitrajectory.dat";
+    output_file = "phitrajectories";
 
     int iarg = 3; // first argument after fix ID group 
 
@@ -161,6 +164,16 @@ void FixRotationTrack::setup(int /*vflag*/)
         for (int i = 0; i < n_theta; i++) // i++ = fait passer i à i+1 à la fin de la boucle
             for (int j = 0; j < 9 * n_mol; j++)
                 R_ref[i * 9 * n_mol + j] = R_bodyframe[j]; // i * 9 * n_mol --> ligne correspondante au seuil i
+
+        if (comm->me == 0) {
+            files.assign(n_theta, nullptr);
+            for (int k = 0; k < n_theta; k++) {
+                std::string nom = output_file + "_" + std::to_string(k + 1) + ".dat";
+                files[k] = fopen(nom.c_str(), "w");
+                if (!files[k]) error->one(FLERR, "Cannot open file {}", nom);
+            }
+        }
+        write_frame();
 
         initialized = true;
     }
@@ -302,4 +315,27 @@ void FixRotationTrack::end_of_step()
             }
         }
     }
+    write_frame();
+}
+
+void FixRotationTrack::write_frame()
+{
+    if (comm->me != 0) return;                       // seul le rang 0 écrit
+
+    for (int k = 0; k < n_theta; k++) {
+        FILE *f = files[k];
+        fprintf(f, "%d\n", n_mol);
+        fprintf(f, "t=%lld\n", (long long) update->ntimestep);
+        for (int m = 0; m < n_mol; m++) {
+            int idx = k * n_mol + m;
+            const double *tot = &phi_total[3 * idx];     // case (k, m)
+            fprintf(f, "%d %.15g %.15g %.15g\n", m + 1, tot[0], tot[1], tot[2]);
+        }
+    }
+}
+
+FixRotationTrack::~FixRotationTrack()
+{
+    for (FILE *f : files)
+        if (f) fclose(f);
 }

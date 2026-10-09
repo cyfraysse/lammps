@@ -218,7 +218,7 @@ void FixRotationTrack::compute_all_bodyframes()
 
 void FixRotationTrack::rotation_vector(const double *dR, double *w)
 {
-    double cos_theta = std::clamp((dR[0]+dR[4]+dR[8]-1)/2, -1.0, 1.0);
+    double cos_theta = std::min(1.0, std::max(-1.0, (dR[0] + dR[4] + dR[8] - 1.0) / 2.0));
 
     double ax;
     double ay;

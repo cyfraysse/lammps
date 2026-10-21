@@ -41,6 +41,10 @@ FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
 
             theta_T.clear();
             iarg += 1;
+            while (iarg < narg && strcmp(arg[iarg], "every") != 0) {
+                theta_T.push_back(utils::numeric(FLERR, arg[iarg], false, lmp));
+                iarg += 1;
+            }
             if (theta_T.empty()) utils::missing_cmd_args(FLERR, "fix rotation/track thetas", error);
 
         } else {error->all(FLERR, "Illegal fix rotation/track keyword: {}", arg[iarg]);}

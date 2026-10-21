@@ -14,21 +14,18 @@
 #include <algorithm>
 #include <limits>
 #include "comm.h"
-#include "update.h"
-#include <string>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace FixConst;
 
-/*-- parse fix rot all rotation/track nevery N thetas theta1 theta2 ... file outputfile.dat --*/
+/*-- parse fix rot all rotation/track nevery N thetas theta1 theta2 ... --*/
 
 FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg)
 {
     nevery = 1;
     theta_T = {MY_PI4}; // pi/4
-    output_file = "phitrajectories";
 
     int iarg = 3; // first argument after fix ID group 
 
@@ -44,22 +41,16 @@ FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
 
             theta_T.clear();
             iarg += 1;
-            while (iarg < narg && strcmp(arg[iarg], "file") != 0 && strcmp(arg[iarg], "every") != 0){
-                theta_T.push_back(utils::numeric(FLERR, arg[iarg], false, lmp));
-                iarg += 1;
-            }
             if (theta_T.empty()) utils::missing_cmd_args(FLERR, "fix rotation/track thetas", error);
-
-        } else if (strcmp(arg[iarg], "file") == 0){
-
-            if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix rotation/track file", error);
-            output_file = arg[iarg + 1];
-            iarg += 2;
 
         } else {error->all(FLERR, "Illegal fix rotation/track keyword: {}", arg[iarg]);}
     }
 
     n_theta = static_cast<int>(theta_T.size());
+    local_flag = 1;                  // ce fix fournit des données locales
+    size_local_cols = 3 * n_theta;   // 3 composantes de Φ par seuil
+    size_local_rows = 0;             // fixé dans setup, quand n_mol est connu
+    local_freq = 1;                  // le dump peut tomber sur n'importe quel pas
     for (double theta : theta_T){
         if (theta < 0.0) error->all(FLERR, "Illegal fix rotation/track thetas value: {}", theta);
         if (theta == 0.0) error->warning(FLERR, "thetas value: {} correspond to the integral method", theta);
@@ -165,15 +156,18 @@ void FixRotationTrack::setup(int /*vflag*/)
             for (int j = 0; j < 9 * n_mol; j++)
                 R_ref[i * 9 * n_mol + j] = R_bodyframe[j]; // i * 9 * n_mol --> ligne correspondante au seuil i
 
-        if (comm->me == 0) {
-            files.assign(n_theta, nullptr);
-            for (int k = 0; k < n_theta; k++) {
-                std::string nom = output_file + "_" + std::to_string(k + 1) + ".dat";
-                files[k] = fopen(nom.c_str(), "w");
-                if (!files[k]) error->one(FLERR, "Cannot open file {}", nom);
-            }
+        local_data.assign(n_mol * 3 * n_theta, 0.0);       // n_mol lignes de 3*n_theta colonnes
+        local_rows.assign(n_mol, nullptr);
+        for (int m = 0; m < n_mol; m++)
+            local_rows[m] = &local_data[m * 3 * n_theta];  // début de la ligne m
+
+        if (comm->me == 0) {                               // une seule copie sort : l'état est répliqué
+            size_local_rows = n_mol;
+            array_local = local_rows.data();
+        } else {
+            size_local_rows = 0;
+            array_local = nullptr;
         }
-        write_frame();
 
         initialized = true;
     }
@@ -308,6 +302,7 @@ void FixRotationTrack::end_of_step()
             rotation_vector(dR,cur);
 
             for (int c = 0; c < 3; c++) tot[c] = acc[c] + cur[c];
+            for (int c = 0; c < 3; c++) local_data[m * 3 * n_theta + 3 * k + c] = tot[c];
 
             if (MathExtra::len3(cur) > theta_T[k]){
                 for (int c = 0; c < 3; c++) acc[c] = tot[c];
@@ -315,27 +310,4 @@ void FixRotationTrack::end_of_step()
             }
         }
     }
-    write_frame();
-}
-
-void FixRotationTrack::write_frame()
-{
-    if (comm->me != 0) return;                       // seul le rang 0 écrit
-
-    for (int k = 0; k < n_theta; k++) {
-        FILE *f = files[k];
-        fprintf(f, "%d\n", n_mol);
-        fprintf(f, "t=%lld\n", (long long) update->ntimestep);
-        for (int m = 0; m < n_mol; m++) {
-            int idx = k * n_mol + m;
-            const double *tot = &phi_total[3 * idx];     // case (k, m)
-            fprintf(f, "%d %.15g %.15g %.15g\n", m + 1, tot[0], tot[1], tot[2]);
-        }
-    }
-}
-
-FixRotationTrack::~FixRotationTrack()
-{
-    for (FILE *f : files)
-        if (f) fclose(f);
 }

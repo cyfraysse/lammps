@@ -25,6 +25,7 @@ class FixRotationTrack : public Fix {
     protected:
     int n_mol = 0;
     int n_theta = 0;
+    int every_check = 1;
     bool initialized = false; 
     std::vector<double> theta_T; // longueur n_theta
     std::vector<double> R_ref; // longueur 9*n_theta*n_mol

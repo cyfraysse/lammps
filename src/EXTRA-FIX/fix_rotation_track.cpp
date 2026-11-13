@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <limits>
 #include "comm.h"
+#include "update.h"
+#include "output.h"
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -23,18 +25,17 @@ using namespace FixConst;
 
 FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg)
-{
-    nevery = 1;
+{   
     theta_T = {MY_PI4}; // pi/4
-
+    every_check = 1;
     int iarg = 3; // first argument after fix ID group 
 
     while (iarg < narg) {
         if (strcmp(arg[iarg], "every") == 0){
 
             if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix rotation/track every", error);
-            nevery = utils::inumeric(FLERR, arg[iarg+1], false, lmp);
-            if (nevery <= 0) error->all(FLERR, "Illegal fix rotation/track every value: {}", nevery);
+            every_check = utils::inumeric(FLERR, arg[iarg+1], false, lmp);
+            if (every_check <= 0) error->all(FLERR, "Illegal fix rotation/track every value: {}", every_check);
             iarg += 2;
 
         } else if (strcmp(arg[iarg], "thetas") == 0){
@@ -60,6 +61,7 @@ FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
         if (theta == 0.0) error->warning(FLERR, "thetas value: {} correspond to the integral method", theta);
         if (theta >= MY_PI) error->warning(FLERR, "thetas value: {} is >= pi and correspond to the Euler method", theta);
     }
+    nevery = 1;  // so end_of_step is called at each time step and the fix decide if it needs to work 
 }
 
 /*-- when to execute --*/
@@ -279,6 +281,11 @@ void FixRotationTrack::rotation_vector(const double *dR, double *w)
 
 void FixRotationTrack::end_of_step()
 {
+    bigint step = update->ntimestep;
+    bool check_now = (step%every_check == 0);
+    bool dump_now  = (step == output->next_dump_any);  
+    if (!check_now && !dump_now) return;
+
     compute_all_bodyframes();
 
     for (int k = 0; k < n_theta; k++){
@@ -308,7 +315,7 @@ void FixRotationTrack::end_of_step()
             for (int c = 0; c < 3; c++) tot[c] = acc[c] + cur[c];
             for (int c = 0; c < 3; c++) local_data[m * 3 * n_theta + 3 * k + c] = tot[c];
 
-            if (MathExtra::len3(cur) > theta_T[k]){
+            if (check_now && MathExtra::len3(cur) > theta_T[k]){ // the tcheck now differentiate on whether we are testing due to the every_check or due to dump
                 for (int c = 0; c < 3; c++) acc[c] = tot[c];
                 for (int c = 0; c < 9; c++) Rref[c] = Rbody[c];
             }

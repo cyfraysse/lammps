@@ -62,6 +62,7 @@ FixRotationTrack::FixRotationTrack(LAMMPS *lmp, int narg, char **arg) :
         if (theta >= MY_PI) error->warning(FLERR, "thetas value: {} is >= pi and correspond to the Euler method", theta);
     }
     nevery = 1;  // so end_of_step is called at each time step and the fix decide if it needs to work 
+    restart_global = 1;
 }
 
 /*-- when to execute --*/
@@ -141,7 +142,6 @@ void FixRotationTrack::init()
     }
     mol_tag.assign(3 * n_mol, 0);
     MPI_Allreduce(local_tags.data(), mol_tag.data(), 3 * n_mol, MPI_LMP_TAGINT, MPI_SUM, world);
-
 }
 
 /*-- at the beginning of each run, declare variables and first call --*/
@@ -158,12 +158,22 @@ void FixRotationTrack::setup(int /*vflag*/)
 
         compute_all_bodyframes();
 
-        for (int i = 0; i < n_theta; i++) // i++ = fait passer i à i+1 à la fin de la boucle
-            for (int j = 0; j < 9 * n_mol; j++)
-                R_ref[i * 9 * n_mol + j] = R_bodyframe[j]; // i * 9 * n_mol --> ligne correspondante au seuil i
+        if (restored) {
+            if (n_mol != static_cast<int>(restart_data[0])) error->all(FLERR, "Number of molecules between chechkpoint and input file do not match. {}, {}", n_mol, restart_data[0]);
+            std::copy(restart_data.begin() + 2 + n_theta, restart_data.begin() + 2 + n_theta + 9*n_theta*n_mol, R_ref.begin());
+            std::copy(restart_data.begin() + 2 + n_theta + 9*n_theta*n_mol, restart_data.begin() + 2 + n_theta + 12*n_theta*n_mol, phi_acc.begin());
+        }
 
-        local_data.assign(n_mol * 3 * n_theta, 0.0);       // n_mol lignes de 3*n_theta colonnes
-        local_rows.assign(n_mol, nullptr);
+        else {
+            for (int i = 0; i < n_theta; i++) // i++ = fait passer i à i+1 à la fin de la boucle
+                for (int j = 0; j < 9 * n_mol; j++)
+                    R_ref[i * 9 * n_mol + j] = R_bodyframe[j]; // i * 9 * n_mol --> ligne correspondante au seuil i
+
+        }
+        
+            local_data.assign(n_mol * 3 * n_theta, 0.0);       // n_mol lignes de 3*n_theta colonnes
+            local_rows.assign(n_mol, nullptr);
+
         for (int m = 0; m < n_mol; m++)
             local_rows[m] = &local_data[m * 3 * n_theta];  // début de la ligne m
 
@@ -321,4 +331,42 @@ void FixRotationTrack::end_of_step()
             }
         }
     }
+}
+
+// pour permettre les restart dans LAMMPS
+void FixRotationTrack::write_restart(FILE *fp)
+{
+    std::vector<double> list;
+
+    list.push_back(n_mol);
+    list.push_back(n_theta);
+    list.insert(list.end(), theta_T.begin(), theta_T.end());
+    list.insert(list.end(), R_ref.begin(), R_ref.end());
+    list.insert(list.end(), phi_acc.begin(), phi_acc.end());
+
+    int nsize = list.size();
+
+    if (comm->me == 0) {
+        int size = nsize * sizeof(double);
+        fwrite(&size, sizeof(int), 1, fp);
+        fwrite(list.data(), sizeof(double), nsize, fp);
+    }
+}
+
+void FixRotationTrack::restart(char *buf)
+{
+    double *list = reinterpret_cast<double *>(buf);
+
+    int n_mol_file   = static_cast<int>(list[0]);
+    int n_theta_file = static_cast<int>(list[1]);
+    int length = 2 + n_theta_file + 12 * n_theta_file * n_mol_file;
+
+    if (n_theta_file != n_theta) error->all(FLERR, "n_theta from checkpoint do not match n_theta from input file. n_theta checkpoint {} vs {}", n_theta_file, n_theta);
+    for (int k = 0; k < n_theta_file; k++) {
+        if (std::fabs(list[2+k] - theta_T[k]) > 1e-12) error->all(FLERR, "thetaT from checkpoint do not match thetaT from input file. {}, {}, {}", k, list[2+k], theta_T[k]);
+    }
+    if (n_mol_file == 0) return; // état vide, la simulation commence sans checkpoint
+
+    restart_data.assign(list, list + length);
+    restored = true;
 }

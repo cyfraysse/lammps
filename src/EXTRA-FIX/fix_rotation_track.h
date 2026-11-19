@@ -11,6 +11,7 @@ FixStyle(rotation/track,FixRotationTrack);
 
 #include "fix.h"
 #include <vector>
+#include <cstdio>
 
 namespace LAMMPS_NS {
 
@@ -21,12 +22,16 @@ class FixRotationTrack : public Fix {
     void init() override; // appelé au début de chaque run (vérifications tc)
     void setup(int) override; // appelé juste après calcul des forces (bon endroit pour lire les positions et initialiser R_ref)
     void end_of_step() override; // à chaque nevery demandé
+    void write_restart(FILE *) override;
+    void restart(char *) override;
 
     protected:
     int n_mol = 0;
     int n_theta = 0;
     int every_check = 1;
     bool initialized = false; 
+    bool restored = false; // est ce que la simulation recommence d'un checkpoint
+    std::vector<double> restart_data; // data contenues dans le checkpoint pour setup()
     std::vector<double> theta_T; // longueur n_theta
     std::vector<double> R_ref; // longueur 9*n_theta*n_mol
     std::vector<double> R_bodyframe; // longueur 9*n_mol

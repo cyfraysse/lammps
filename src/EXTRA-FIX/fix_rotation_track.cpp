@@ -314,7 +314,7 @@ void FixRotationTrack::end_of_step()
                 for (int j = 0; j < 3; j ++){
                     double S = 0;
                     for (int a = 0; a < 3; a++){
-                        S += Rref[a + 3 * i] * Rbody[a + 3 * j]; 
+                        S += Rbody[i + 3 * a] * Rref[j + 3 * a]; // cette expression de la rotation relative est définie dans le référentiel du "laboratoire" 
                     }
                     dR[i + 3 * j] = S;
                 }
